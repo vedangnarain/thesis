@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec 19 15:55:15 2024
+
+@author: Vedang Narain (vedang.narain@msdtc.ox.ac.uk)
+
+Test the metrics on biological networks.
+"""
+
+# =============================================================================
+# LIBRARIES & INITIALISATION
+# =============================================================================
+
+# Import basic libraries
+from itertools import cycle
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import math
+import numpy as np
+import os
+import pandas as pd
+import seaborn as sns
+from pathlib import Path
+
+# For machine learning and stats
+import scipy.stats as stats
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split, cross_val_score, KFold
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.kernel_ridge import KernelRidge
+
+# Import visualisation functions
+from scipy.ndimage import zoom
+from PIL import Image
+
+# Set LaTex-style font
+plt.rcParams['mathtext.fontset'] = 'stix'
+plt.rcParams['font.family'] = 'STIXGeneral'
+# plt.rcParams.update({'font.size': 22})
+plt.rcParams.update({'font.size': 22})
+sns.set(font='STIXGeneral', font_scale=1.7)
+
+# Import custom functions
+from get_paraview_data import *
+from calculate_surviving_fraction import *
+from convert_oxygen_units import *
+
+# =============================================================================
+# FUNCTIONS
+# =============================================================================
+
+# Function to load and process VTI data
+def load_field_data(field_path):
+    field_data, field_spacing = get_vti_data(field_path)
+    O2_field, _ = get_plottable_field(field_data)
+    return O2_field, field_spacing
+
+# Define a function to return the network and oxygen from a folder
+def get_simulation(simulation_path):
+
+    # Specify file paths
+    network_path = os.path.join(simulation_path, 'FinalHaematocrit.vtp')
+    field_path =  os.path.join(simulation_path, 'results_from_time_0', 'oxygen_solution_0.vti')
+    
+    # Get the network edges
+    point_coordinates_data_array, point_data_array, cell_data_array, polydata = get_vtk_data(network_path)
+    reference_node_coordinates, _, _ = get_reference_hexagonal_network(network_path)  # Just use the unpruned network as a reference network
+    segment_nodes, segment_xyxy = get_vessel_nodes(polydata, reference_node_coordinates)
+
+    # Get the oxygen
+#     field_path = os.path.join(kill_path_template,'oxygen_solution_0.vti')
+    O2_field_old, field_spacing_old = load_field_data(field_path)
+    
+    return segment_xyxy, O2_field_old, segment_nodes, reference_node_coordinates, cell_data_array, point_data_array
+
+# Define a function to visualise a simulation
+def visualise_simulation(simulation_path, network_metrics, size_largest_connected_component, gif_filename=None):
+    
+    segment_xyxy, O2_field, segment_nodes, reference_node_coordinates, cell_data_array, point_data_array = get_simulation(simulation_path)
+    O2_field = convert_nM_to_mmHg(O2_field)
+    
+    # Stretch the O2_field to match the new dimensions
+    # Adjust the zoom factor based on original size and new size
+    zoom_x = new_x_size / O2_field.shape[1]
+    zoom_y = new_y_size / O2_field.shape[0]
+    O2_field_stretched = zoom(O2_field, (zoom_y, zoom_x))
+    
+    # Create a figure and axis
+    fig, ax = plt.subplots(figsize=(10, 10))  # Make the plot square and bigger
+    ax.grid(False)
+
+    # Display the stretched O2 field with custom colouring
+    O2_field_coloured = np.where(O2_field_stretched < 3.28, 0, 1)  # 0 for values below 3.28 (light blue), 1 for above (light red)
+    cmap = plt.cm.get_cmap('coolwarm')  # Use 'RdBu_r' colormap for light blue and light red
+    im = ax.imshow(O2_field_coloured, cmap=cmap, origin='lower', extent=[x_min, x_max, y_min, y_max], vmin=0, vmax=1, alpha=0.5)
+    
+    # Overlay the segments
+    ax.plot(segment_xyxy[:, [0, 2]].T, segment_xyxy[:, [1, 3]].T, c='black', lw=3)  # Vectorized plotting
+
+    # Plot nodes coloured by betweenness
+    node_coordinates = reference_node_coordinates  # Assuming reference_node_coordinates contain (x, y) for each node
+    betweenness_values = [network_metrics['betweenness_unweighted'][i] for i in range(len(node_coordinates)) if i in network_metrics['betweenness_unweighted']]  # Ignore missing nodes
+    valid_node_coordinates = [node_coordinates[i] for i in range(len(node_coordinates)) if i in network_metrics['betweenness_unweighted']]
+    scatter = ax.scatter(
+        [node[0] for node in valid_node_coordinates],
+        [node[1] for node in valid_node_coordinates],
+        c=betweenness_values,
+        cmap='plasma',  # Changed colour map to 'plasma' for better contrast
+        s=150,  # Increased node size for better visibility
+        edgecolor='k'
+    )
+
+    # Add colorbar for betweenness
+    plt.colorbar(scatter, ax=ax, label='Betweenness Centrality')
+    
+    # Calculate metrics for title
+    avg_betweenness = np.mean(betweenness_values) if betweenness_values else 0
+    # fraction_above_3_28 = np.sum(O2_field_stretched >= 3.28) / O2_field_stretched.size
+    n_vessels = len(segment_xyxy)
+    
+    # Set labels and title
+    ax.set_xlabel('x-axis (μm)')
+    ax.set_ylabel('y-axis (μm)')
+    ax.set_title(f'B = {avg_betweenness:.2f}, SoLCC = {size_largest_connected_component} nodes, Nv = {n_vessels}', fontsize=20)  # Smaller font size for title
+    
+    # Save the plot to a temporary file
+    if gif_filename:
+        plt.savefig("temp_plot.png")
+        plt.close(fig)  # Close the figure to prevent display
+
+        return Image.open("temp_plot.png")
+    else:
+        plt.show()
+    
+    # return segment_nodes, reference_node_coordinates, cell_data_array['Vessel Length']*1000000, segment_xyxy, cell_data_array, point_data_array
+    return segment_nodes, reference_node_coordinates, cell_data_array['Vessel Length']*1000000, segment_xyxy, cell_data_array, point_data_array
+
+# =============================================================================
+# SIMULATION DETAILS
+# =============================================================================
+
+# Enter the details of the simulation data to analyse
+inlet_h = 0.3
+hypoxic_threshold_list = [4500, 10975]  # 3.28 mmHg and 8 mmHg
+
+# Base directory path
+# simulation_path = '/scratch/narain/testoutput/TestMetastaticNetworkTissue/ConstantHaematocrit'
+# simulation_path = '/scratch/narain/testoutput/perfusion_plot/H0.07318/TestMetastaticNetworkTissue/ConstantHaematocrit'
+simulation_path = '/scratch/narain/testoutput/perfusion_plot/H0.1/TestMetastaticNetworkTissue/ConstantHaematocrit'
+
+# Specify the image size
+x_min = 0
+x_max = 1214.56
+y_min = 0
+y_max = 1214.56
+pq_threshold = 1.e-130  # Make it arbitrarily small so any vessel capable of flow is perfused
+
+# Create a meshgrid for the new dimensions based on the segment boundaries
+new_x_size = int(x_max - x_min) + 1  # Width of the new image
+new_y_size = int(y_max - y_min) + 1  # Height of the new image
+
+# Specify file paths
+network_path = os.path.join(simulation_path, 'FinalHaematocrit.vtp')
+field_path =  os.path.join(simulation_path, 'results_from_time_0', 'oxygen_solution_0.vti')
+
+# =============================================================================
+# COMPUTE NF
+# =============================================================================
+
+# Compute the O2 distribution
+field_data, field_spacing = get_vti_data(field_path)  # import the data for the network
+flat_field = field_data['oxygen'].to_numpy().flatten()
+
+# Get reference coordinates from the unpruned network
+reference_node_coordinates, reference_network_vessel_nodes, reference_network_coordinates = get_reference_hexagonal_network(network_path)  # Just use the network as a reference network
+
+# Compute the metrics and get the graph
+metrics, G_filtered = get_voronoi_predictors(network_path, reference_node_coordinates, reference_network_coordinates, reference_network_vessel_nodes, pq_threshold, field_data, inlet_h)
+
+# Compute the metrics
+surface_area = max(field_data['x']) * max(field_data['y'])
+fcd = metrics['fcd_numerator'] / surface_area
+ppv = metrics['n_perfused_vessels'] / metrics['n_vessels'] if metrics['n_vessels'] != 0 else 0
+tda_metrics = metrics['tda_metrics']  # Nested dictionary with network metrics
+size_largest_connected_component = [tda_metrics['size_largest_connected_component']]
+
+# Access subdatasets
+# h_metrics = metrics['h_metrics']  # Nested dictionary with network metrics
+network_metrics = metrics['network_metrics']  # Nested dictionary with network metrics
+betweenness_unweighted_avg = np.mean(list(network_metrics['betweenness_unweighted'].values()))    
+lpv = metrics['n_cycles'] / metrics['n_vessels']
+
+print('NFs (cells,field)', compare_field_cells_NF(simulation_path+'/results_from_time_0',hypoxic_threshold_list[0]))
+print('lpv ', lpv, )
+print('betweenness_unweighted_avg ', betweenness_unweighted_avg, )
+
+# Visualise the simulation
+visualise_simulation(simulation_path, network_metrics, size_largest_connected_component, gif_filename=None)

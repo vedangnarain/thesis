@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<parameter_collection>
+<parameter>
+<added_by>User</added_by>
+<name>Owen11_InflowHaematocrit</name>
+<value>0.45</value>
+<description>Inflow haematocrit</description>
+<symbol>H_{in}</symbol>
+<source>"@article{Owen2011, 
+ author = {Owen, Markus R and Stamper, I Johanna and Muthana, Munitta and Richardson, Giles W and Dobson, Jon and Lewis, Claire E and Byrne, Helen M},
+ journal = {Cancer research}, 
+ month = {apr}, 
+ number = {8}, 
+ pages = {2826--37},
+ title = {{Mathematical modeling predicts synergistic antitumor effects of combining a macrophage-based, hypoxia-targeted gene therapy with chemotherapy.}},
+ volume = {71}, 
+ year = {2011}}"</source>
+</parameter>
+<parameter>
+<added_by>ViscosityCalculator</added_by>
+<name>Owen11_PlasmaViscosity</name>
+<value>0.0012</value>
+<description>Blood plasma viscosity</description>
+<symbol>\mu_{plasma}</symbol>
+<source>"@article{Owen2011, 
+ author = {Owen, Markus R and Stamper, I Johanna and Muthana, Munitta and Richardson, Giles W and Dobson, Jon and Lewis, Claire E and Byrne, Helen M},
+ journal = {Cancer research}, 
+ month = {apr}, 
+ number = {8}, 
+ pages = {2826--37},
+ title = {{Mathematical modeling predicts synergistic antitumor effects of combining a macrophage-based, hypoxia-targeted gene therapy with chemotherapy.}},
+ volume = {71}, 
+ year = {2011}}"</source>
+</parameter>
+</parameter_collection>
